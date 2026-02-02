@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -48,11 +49,6 @@ func (c *Client) Run() (int, error) {
 	}
 	defer c.disconnect()
 
-	// Print session banner
-	if c.shortID != "" {
-		c.printBanner()
-	}
-
 	// Start shell in PTY
 	shell := c.Shell
 	if shell == "" {
@@ -68,6 +64,9 @@ func (c *Client) Run() (int, error) {
 		streamshEnv += " - " + c.Title
 	}
 	cmd.Env = append(os.Environ(), "STREAMSH="+streamshEnv)
+
+	cleanup := c.setupShellPrompt(shell, cmd)
+	defer cleanup()
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -160,24 +159,95 @@ func (c *Client) disconnect() {
 	c.conn = nil
 }
 
-func (c *Client) printBanner() {
-	const purple = "\033[35m"
-	const dim = "\033[2m"
-	const reset = "\033[0m"
-
-	label := c.shortID
+func (c *Client) promptTag() string {
 	if c.Title != "" {
-		label += " - " + c.Title
+		return fmt.Sprintf("[streamsh - %s (%s)]", c.Title, c.shortID)
+	}
+	return fmt.Sprintf("[streamsh - %s]", c.shortID)
+}
+
+func (c *Client) setupShellPrompt(shell string, cmd *exec.Cmd) (cleanup func()) {
+	tag := c.promptTag()
+	noop := func() {}
+
+	if c.shortID == "" {
+		return noop
 	}
 
-	inner := " streamsh [" + label + "] "
-	width := len(inner) + 2 // +2 for side borders
+	base := filepath.Base(shell)
 
-	top := purple + "╭" + strings.Repeat("─", width-2) + "╮" + reset
-	mid := purple + "│" + reset + inner + purple + "│" + reset
-	bot := purple + "╰" + strings.Repeat("─", width-2) + "╯" + reset
+	switch {
+	case base == "bash" || strings.HasPrefix(base, "bash"):
+		dir, err := os.MkdirTemp("", "streamsh-rc-*")
+		if err != nil {
+			return noop
+		}
+		content := fmt.Sprintf(
+			"[[ -f \"$HOME/.bashrc\" ]] && source \"$HOME/.bashrc\"\n"+
+				"_STREAMSH_ORIG_PS1=\"$PS1\"\n"+
+				"_STREAMSH_ORIG_PROMPT_COMMAND=\"$PROMPT_COMMAND\"\n"+
+				"PROMPT_COMMAND='eval \"$_STREAMSH_ORIG_PROMPT_COMMAND\"; PS1=\"\\[\\e[35m\\]%s\\[\\e[0m\\] $_STREAMSH_ORIG_PS1\"'\n",
+			tag,
+		)
+		rcPath := filepath.Join(dir, ".bashrc")
+		if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+			os.RemoveAll(dir)
+			return noop
+		}
+		cmd.Args = []string{shell, "--rcfile", rcPath}
+		return func() { os.RemoveAll(dir) }
 
-	fmt.Fprintf(os.Stdout, "\n%s\n%s\n%s\n\n", top, mid, bot)
+	case base == "zsh" || strings.HasPrefix(base, "zsh"):
+		dir, err := os.MkdirTemp("", "streamsh-rc-*")
+		if err != nil {
+			return noop
+		}
+		home := os.Getenv("HOME")
+		escaped := strings.ReplaceAll(tag, "%", "%%")
+		content := fmt.Sprintf(
+			"[[ -f \"%s/.zshrc\" ]] && ZDOTDIR=\"%s\" source \"%s/.zshrc\"\n"+
+				"_streamsh_orig_ps1=\"$PS1\"\n"+
+				"_streamsh_precmd() { PS1=\"%%F{magenta}%s%%f $_streamsh_orig_ps1\" }\n"+
+				"precmd_functions=(_streamsh_precmd $precmd_functions)\n",
+			home, home, home, escaped,
+		)
+		rcPath := filepath.Join(dir, ".zshrc")
+		if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+			os.RemoveAll(dir)
+			return noop
+		}
+		cmd.Env = append(cmd.Env, "ZDOTDIR="+dir)
+		return func() { os.RemoveAll(dir) }
+
+	case base == "fish" || strings.HasPrefix(base, "fish"):
+		initScript := fmt.Sprintf(
+			"functions -c fish_prompt _streamsh_orig_prompt\n"+
+				"function fish_prompt\n"+
+				"    set_color magenta\n"+
+				"    echo -n '%s '\n"+
+				"    set_color normal\n"+
+				"    _streamsh_orig_prompt\n"+
+				"end\n",
+			tag,
+		)
+		cmd.Args = []string{shell, "-C", initScript}
+		return noop
+
+	default:
+		// POSIX fallback
+		dir, err := os.MkdirTemp("", "streamsh-rc-*")
+		if err != nil {
+			return noop
+		}
+		content := fmt.Sprintf("PS1='\\033[35m%s\\033[0m '$PS1\n", tag)
+		rcPath := filepath.Join(dir, ".shrc")
+		if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+			os.RemoveAll(dir)
+			return noop
+		}
+		cmd.Env = append(cmd.Env, "ENV="+rcPath)
+		return func() { os.RemoveAll(dir) }
+	}
 }
 
 func (c *Client) sendMsg(env Envelope) {
