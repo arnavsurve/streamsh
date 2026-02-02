@@ -36,6 +36,12 @@ type Client struct {
 // Run starts the shell session and streams output to the daemon.
 // It returns the shell's exit code.
 func (c *Client) Run() (int, error) {
+	// Check if already inside a streamsh session
+	if id := os.Getenv("STREAMSH"); id != "" {
+		fmt.Fprintf(os.Stderr, "Already in a streamsh session [%s]\n", id)
+		return 1, nil
+	}
+
 	// Connect to daemon
 	if err := c.connect(); err != nil {
 		c.Logger.Warn("could not connect to daemon, session will not be recorded", "err", err)
@@ -57,7 +63,11 @@ func (c *Client) Run() (int, error) {
 	}
 
 	cmd := exec.Command(shell)
-	cmd.Env = os.Environ()
+	streamshEnv := c.shortID
+	if c.Title != "" {
+		streamshEnv += " - " + c.Title
+	}
+	cmd.Env = append(os.Environ(), "STREAMSH="+streamshEnv)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

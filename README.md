@@ -31,4 +31,4 @@ streamsh
 
 Each session is identified by a short UUID prefix (e.g. `a1b2c3d4`). You can optionally pass `--title "dev server"` for a human-friendly label.
 
-Agents connect to `streamshd` as an MCP server (stdio) and can list sessions, read the last N lines, search output, or paginate with a cursor.
+Agents connect to `streamshd` as an MCP server (stdio) and can list sessions, read the last N lines, search output, or paginate with a cursor. No need to run it manually -- this is the binary ran by your coding agent to host the MCP server.
