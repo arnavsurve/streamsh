@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -28,6 +29,7 @@ type Client struct {
 	conn      net.Conn
 	enc       *json.Encoder
 	sessionID string
+	shortID   string
 	mu        sync.Mutex // protects writes to conn
 }
 
@@ -39,6 +41,11 @@ func (c *Client) Run() (int, error) {
 		c.Logger.Warn("could not connect to daemon, session will not be recorded", "err", err)
 	}
 	defer c.disconnect()
+
+	// Print session banner
+	if c.shortID != "" {
+		c.printBanner()
+	}
 
 	// Start shell in PTY
 	shell := c.Shell
@@ -78,11 +85,7 @@ func (c *Client) Run() (int, error) {
 	var wg sync.WaitGroup
 
 	// stdin -> PTY (with command detection)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.copyStdinToPTY(ptmx)
-	}()
+	go c.copyStdinToPTY(ptmx)
 
 	// PTY -> stdout + daemon
 	wg.Add(1)
@@ -131,6 +134,7 @@ func (c *Client) connect() error {
 			var ack RegisterAck
 			json.Unmarshal(env.Payload, &ack)
 			c.sessionID = ack.SessionID
+			c.shortID = ack.ShortID
 			c.Logger.Info("session registered", "id", ack.ShortID)
 		}
 	}
@@ -144,6 +148,26 @@ func (c *Client) disconnect() {
 	c.sendMsg(Envelope{Type: MsgDisconnect, SessionID: c.sessionID})
 	c.conn.Close()
 	c.conn = nil
+}
+
+func (c *Client) printBanner() {
+	const purple = "\033[35m"
+	const dim = "\033[2m"
+	const reset = "\033[0m"
+
+	label := c.shortID
+	if c.Title != "" {
+		label += " - " + c.Title
+	}
+
+	inner := " streamsh [" + label + "] "
+	width := len(inner) + 2 // +2 for side borders
+
+	top := purple + "╭" + strings.Repeat("─", width-2) + "╮" + reset
+	mid := purple + "│" + reset + inner + purple + "│" + reset
+	bot := purple + "╰" + strings.Repeat("─", width-2) + "╯" + reset
+
+	fmt.Fprintf(os.Stdout, "\n%s\n%s\n%s\n\n", top, mid, bot)
 }
 
 func (c *Client) sendMsg(env Envelope) {
