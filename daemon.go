@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -145,7 +146,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 				continue
 			}
 			for _, line := range p.Lines {
-				sess.Buffer.Append(line)
+				sess.Buffer.Append(stripANSI(line))
 			}
 			sess.LastActivity = time.Now()
 
@@ -200,4 +201,12 @@ func mustMarshal(v any) json.RawMessage {
 // Exported for testing convenience.
 func GetUid() string {
 	return strconv.Itoa(os.Getuid())
+}
+
+// ansiRe matches ANSI escape sequences: CSI sequences, OSC sequences, and
+// other single-character escapes.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)|\x1b[^[\]]?`)
+
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
 }
