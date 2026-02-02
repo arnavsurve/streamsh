@@ -6,7 +6,7 @@ import (
 
 func TestStoreCreateAndList(t *testing.T) {
 	s := NewStore()
-	sess := s.Create("test-session", 100)
+	sess := s.Create("test-session", 100, false, nil)
 
 	if sess.Title != "test-session" {
 		t.Errorf("title = %q, want %q", sess.Title, "test-session")
@@ -26,7 +26,7 @@ func TestStoreCreateAndList(t *testing.T) {
 
 func TestStoreGet(t *testing.T) {
 	s := NewStore()
-	sess := s.Create("get-test", 100)
+	sess := s.Create("get-test", 100, false, nil)
 
 	found, ok := s.Get(sess.ID)
 	if !ok || found.ID != sess.ID {
@@ -36,7 +36,7 @@ func TestStoreGet(t *testing.T) {
 
 func TestStoreFindByPrefix(t *testing.T) {
 	s := NewStore()
-	sess := s.Create("prefix-test", 100)
+	sess := s.Create("prefix-test", 100, false, nil)
 
 	found, err := s.FindByPrefix(sess.ShortID[:4])
 	if err != nil {
@@ -49,8 +49,8 @@ func TestStoreFindByPrefix(t *testing.T) {
 
 func TestStoreFindByPrefixAmbiguous(t *testing.T) {
 	s := NewStore()
-	s.Create("a", 100)
-	s.Create("b", 100)
+	s.Create("a", 100, false, nil)
+	s.Create("b", 100, false, nil)
 
 	// Using empty prefix matches all -> ambiguous
 	_, err := s.FindByPrefix("")
@@ -61,7 +61,7 @@ func TestStoreFindByPrefixAmbiguous(t *testing.T) {
 
 func TestStoreFindByTitle(t *testing.T) {
 	s := NewStore()
-	s.Create("My Session", 100)
+	s.Create("My Session", 100, false, nil)
 
 	found, err := s.FindByTitle("my session") // case insensitive
 	if err != nil {
@@ -74,7 +74,7 @@ func TestStoreFindByTitle(t *testing.T) {
 
 func TestStoreResolve(t *testing.T) {
 	s := NewStore()
-	sess := s.Create("dev-server", 100)
+	sess := s.Create("dev-server", 100, false, nil)
 
 	// By full UUID
 	found, err := s.Resolve(sess.ID.String())
@@ -103,7 +103,7 @@ func TestStoreResolve(t *testing.T) {
 
 func TestStoreRemove(t *testing.T) {
 	s := NewStore()
-	sess := s.Create("to-remove", 100)
+	sess := s.Create("to-remove", 100, false, nil)
 	s.Remove(sess.ID)
 
 	if len(s.List()) != 0 {

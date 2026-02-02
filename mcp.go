@@ -17,6 +17,7 @@ type SessionInfo struct {
 	LineCount   int    `json:"line_count"`
 	CreatedAt   string `json:"created_at"`
 	Connected   bool   `json:"connected"`
+	Collab      bool   `json:"collab"`
 }
 
 // ListSessionsInput is the input for the list_sessions tool.
@@ -30,6 +31,12 @@ type QuerySessionInput struct {
 	Cursor     uint64 `json:"cursor,omitempty" jsonschema:"Start reading from this sequence number for pagination"`
 	Count      int    `json:"count,omitempty" jsonschema:"Number of lines to return with cursor mode (default 100)"`
 	MaxResults int    `json:"max_results,omitempty" jsonschema:"Max results for search mode (default 50)"`
+}
+
+// WriteSessionInput is the input for the write_session tool.
+type WriteSessionInput struct {
+	Session string `json:"session" jsonschema:"required,Session identifier: short ID, UUID, or title"`
+	Text    string `json:"text" jsonschema:"required,Raw text to write to the session PTY. Include newline (\\n) to execute a command. Only works on collaborative sessions (started with --collab)."`
 }
 
 // QuerySessionOutput is the JSON representation of query_session results.
@@ -58,6 +65,7 @@ func RegisterMCPTools(server *mcp.Server, store *Store) {
 				LineCount:   s.Buffer.Len(),
 				CreatedAt:   s.CreatedAt.Format(time.RFC3339),
 				Connected:   s.Connected,
+				Collab:      s.Collab,
 			}
 		}
 
@@ -116,6 +124,41 @@ func RegisterMCPTools(server *mcp.Server, store *Store) {
 		}
 
 		result, _ := json.Marshal(output)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(result)},
+			},
+		}, nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "write_session",
+		Description: "Send raw text input to a collaborative shell session's PTY. The text is written exactly as provided — include \\n to press Enter and execute a command. Only works on sessions started with the --collab flag. The user sees all input in real-time.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input WriteSessionInput) (*mcp.CallToolResult, any, error) {
+		sess, err := store.Resolve(input.Session)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf("Error: %v", err)},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+
+		if err := sess.SendInput(input.Text); err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf("Error: %v", err)},
+				},
+				IsError: true,
+			}, nil, nil
+		}
+
+		result, _ := json.Marshal(map[string]any{
+			"success":    true,
+			"session_id": sess.ShortID,
+			"bytes_sent": len(input.Text),
+		})
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: string(result)},

@@ -13,6 +13,7 @@ func main() {
 	socketPath := flag.String("socket", streamsh.SocketPathFromEnv(), "Unix socket path")
 	title := flag.String("title", "", "Session title (auto-generated if empty)")
 	shell := flag.String("shell", "", "Shell to launch (defaults to $SHELL)")
+	collab := flag.Bool("collab", false, "Allow agents to send input to this session")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -22,6 +23,7 @@ func main() {
 		Title:      *title,
 		SocketPath: *socketPath,
 		Logger:     logger,
+		Collab:     *collab,
 	}
 
 	exitCode, err := client.Run()

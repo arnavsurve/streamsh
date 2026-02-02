@@ -26,9 +26,11 @@ type Client struct {
 	Title      string
 	SocketPath string
 	Logger     *slog.Logger
+	Collab     bool
 
 	conn      net.Conn
 	enc       *json.Encoder
+	scanner   *bufio.Scanner
 	sessionID string
 	shortID   string
 	mu        sync.Mutex // protects writes to conn
@@ -96,6 +98,11 @@ func (c *Client) Run() (int, error) {
 	// stdin -> PTY (with command detection)
 	go c.copyStdinToPTY(ptmx)
 
+	// daemon -> PTY (collab mode: receive agent input)
+	if c.Collab && c.conn != nil {
+		go c.handleIncomingMessages(ptmx)
+	}
+
 	// PTY -> stdout + daemon
 	wg.Add(1)
 	go func() {
@@ -132,14 +139,15 @@ func (c *Client) connect() error {
 	c.enc = json.NewEncoder(conn)
 
 	// Register session
-	payload := mustMarshal(RegisterPayload{Title: c.Title})
+	payload := mustMarshal(RegisterPayload{Title: c.Title, Collab: c.Collab})
 	c.sendMsg(Envelope{Type: MsgRegister, Payload: payload})
 
-	// Read ack
-	scanner := bufio.NewScanner(conn)
-	if scanner.Scan() {
+	// Read ack (keep scanner for later use in collab mode)
+	c.scanner = bufio.NewScanner(conn)
+	c.scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	if c.scanner.Scan() {
 		var env Envelope
-		if err := json.Unmarshal(scanner.Bytes(), &env); err == nil && env.Type == MsgAck {
+		if err := json.Unmarshal(c.scanner.Bytes(), &env); err == nil && env.Type == MsgAck {
 			var ack RegisterAck
 			json.Unmarshal(env.Payload, &ack)
 			c.sessionID = ack.SessionID
@@ -157,6 +165,25 @@ func (c *Client) disconnect() {
 	c.sendMsg(Envelope{Type: MsgDisconnect, SessionID: c.sessionID})
 	c.conn.Close()
 	c.conn = nil
+}
+
+func (c *Client) handleIncomingMessages(ptmx *os.File) {
+	for c.scanner.Scan() {
+		var env Envelope
+		if err := json.Unmarshal(c.scanner.Bytes(), &env); err != nil {
+			c.Logger.Debug("failed to parse incoming message", "err", err)
+			continue
+		}
+		if env.Type == MsgInput {
+			var p InputPayload
+			if env.Payload != nil {
+				json.Unmarshal(env.Payload, &p)
+			}
+			if p.Text != "" {
+				ptmx.Write([]byte(p.Text))
+			}
+		}
+	}
 }
 
 func (c *Client) promptTag() string {

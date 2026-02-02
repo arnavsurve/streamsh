@@ -124,9 +124,13 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 			if p.BufferSize > 0 {
 				bufSize = p.BufferSize
 			}
-			sess := d.Store.Create(p.Title, bufSize)
+			var clientConn net.Conn
+			if p.Collab {
+				clientConn = conn
+			}
+			sess := d.Store.Create(p.Title, bufSize, p.Collab, clientConn)
 			sessionID = sess.ID
-			d.Logger.Info("session registered", "id", sess.ShortID, "title", p.Title)
+			d.Logger.Info("session registered", "id", sess.ShortID, "title", p.Title, "collab", p.Collab)
 
 			enc.Encode(Envelope{
 				Type: MsgAck,
@@ -166,6 +170,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 			sess, ok := d.Store.Get(sessionID)
 			if ok {
 				sess.Connected = false
+				sess.ClearConn()
 				sess.LastActivity = time.Now()
 				d.Logger.Info("session disconnected", "id", sess.ShortID)
 			}
@@ -176,6 +181,7 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 	// Connection closed without disconnect message
 	if sess, ok := d.Store.Get(sessionID); ok {
 		sess.Connected = false
+		sess.ClearConn()
 		sess.LastActivity = time.Now()
 	}
 }

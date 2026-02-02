@@ -10,6 +10,7 @@ const (
 	MsgOutput     MsgType = "output"
 	MsgCommand    MsgType = "command"
 	MsgDisconnect MsgType = "disconnect"
+	MsgInput      MsgType = "input"
 	MsgAck        MsgType = "ack"
 	MsgError      MsgType = "error"
 )
@@ -25,6 +26,7 @@ type Envelope struct {
 type RegisterPayload struct {
 	Title      string `json:"title,omitempty"`
 	BufferSize int    `json:"buffer_size,omitempty"`
+	Collab     bool   `json:"collab,omitempty"`
 }
 
 // RegisterAck is sent by the daemon after a successful registration.
@@ -41,6 +43,11 @@ type OutputPayload struct {
 // CommandPayload carries the last detected command from client to daemon.
 type CommandPayload struct {
 	Command string `json:"command"`
+}
+
+// InputPayload carries text from daemon to client to be written to the PTY.
+type InputPayload struct {
+	Text string `json:"text"`
 }
 
 // ErrorPayload carries an error message from daemon to client.

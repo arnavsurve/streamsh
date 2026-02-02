@@ -1,7 +1,9 @@
 package streamsh
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,9 @@ type Session struct {
 	LastCommand  string
 	Connected    bool
 	Buffer       *RingBuffer
+	Collab       bool
+	clientConn   net.Conn
+	connMu       sync.Mutex
 }
 
 // Store is a thread-safe collection of sessions.
@@ -35,7 +40,7 @@ func NewStore() *Store {
 }
 
 // Create adds a new session to the store and returns it.
-func (s *Store) Create(title string, bufCap int) *Session {
+func (s *Store) Create(title string, bufCap int, collab bool, conn net.Conn) *Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -49,9 +54,35 @@ func (s *Store) Create(title string, bufCap int) *Session {
 		LastActivity: now,
 		Connected:    true,
 		Buffer:       NewRingBuffer(bufCap),
+		Collab:       collab,
+		clientConn:   conn,
 	}
 	s.sessions[id] = sess
 	return sess
+}
+
+// SendInput sends text to the session's PTY via the client connection.
+func (s *Session) SendInput(text string) error {
+	if !s.Collab {
+		return fmt.Errorf("session %s is not collaborative (start with --collab)", s.ShortID)
+	}
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	if !s.Connected || s.clientConn == nil {
+		return fmt.Errorf("session %s is not connected", s.ShortID)
+	}
+	env := Envelope{
+		Type:    MsgInput,
+		Payload: mustMarshal(InputPayload{Text: text}),
+	}
+	return json.NewEncoder(s.clientConn).Encode(env)
+}
+
+// ClearConn removes the client connection reference.
+func (s *Session) ClearConn() {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	s.clientConn = nil
 }
 
 // Get returns a session by its full UUID.
