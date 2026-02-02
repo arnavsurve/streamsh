@@ -4,7 +4,19 @@ Lets coding agents read your shell output. Run `streamsh` to wrap your terminal 
 
 ## Install
 
-Requires Go 1.25.6+.
+**Quick install:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/arnavsurve/streamsh/main/install.sh | sh
+```
+
+This downloads prebuilt binaries to `~/.local/bin`. Set a custom location with `INSTALL_DIR`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/arnavsurve/streamsh/main/install.sh | INSTALL_DIR=/usr/local/bin sh
+```
+
+**With Go:**
 
 ```sh
 go install github.com/arnavsurve/streamsh/cmd/streamsh@latest
@@ -18,8 +30,6 @@ git clone https://github.com/arnavsurve/streamsh.git
 cd streamsh
 ./install.sh
 ```
-
-Make sure `$GOPATH/bin` (typically `~/go/bin`) is in your `$PATH`.
 
 ## Usage
 
