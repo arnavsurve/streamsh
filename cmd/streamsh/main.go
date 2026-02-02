@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/asurve/streamsh"
+	"github.com/arnavsurve/streamsh"
 )
 
 func main() {

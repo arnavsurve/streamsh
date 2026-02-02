@@ -1,4 +1,4 @@
-module github.com/asurve/streamsh
+module github.com/arnavsurve/streamsh
 
 go 1.25.6
 

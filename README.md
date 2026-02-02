@@ -5,8 +5,8 @@ Lets coding agents read your shell output. Run `streamsh` to wrap your terminal 
 ## Install
 
 ```sh
-go install github.com/asurve/streamsh/cmd/streamsh@latest
-go install github.com/asurve/streamsh/cmd/streamshd@latest
+go install github.com/arnavsurve/streamsh/cmd/streamsh@latest
+go install github.com/arnavsurve/streamsh/cmd/streamshd@latest
 ```
 
 ## Usage
