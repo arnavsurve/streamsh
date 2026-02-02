@@ -4,10 +4,22 @@ Lets coding agents read your shell output. Run `streamsh` to wrap your terminal 
 
 ## Install
 
+Requires Go 1.25.6+.
+
 ```sh
 go install github.com/arnavsurve/streamsh/cmd/streamsh@latest
 go install github.com/arnavsurve/streamsh/cmd/streamshd@latest
 ```
+
+**From source:**
+
+```sh
+git clone https://github.com/arnavsurve/streamsh.git
+cd streamsh
+./install.sh
+```
+
+Make sure `$GOPATH/bin` (typically `~/go/bin`) is in your `$PATH`.
 
 ## Usage
 
