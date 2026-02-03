@@ -31,6 +31,44 @@ cd streamsh
 ./install.sh
 ```
 
+## MCP Setup
+
+Register `streamshd` as an MCP server so your coding agent can query terminal sessions.
+
+### Claude Code
+
+```sh
+claude mcp add -s user streamsh -- streamshd
+```
+
+This registers the server globally (user scope), making it available across all projects. Alternatively, add it manually to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "streamsh": {
+      "type": "stdio",
+      "command": "streamshd"
+    }
+  }
+}
+```
+
+### OpenCode
+
+Add to `opencode.json` in your project root, or `~/.config/opencode/opencode.json` for global access:
+
+```json
+{
+  "mcp": {
+    "streamsh": {
+      "type": "local",
+      "command": ["streamshd"]
+    }
+  }
+}
+```
+
 ## Usage
 
 Start the daemon (typically configured as an MCP server in your agent), then open a tracked session in your terminal:
