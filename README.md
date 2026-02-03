@@ -1,20 +1,23 @@
 # streamsh
 
-Lets coding agents read your shell output. Run `streamsh` to wrap your terminal session. Agents can then search and page through the output via MCP tools (`list_sessions`, `query_session`).
+Give coding agents eyes on your terminal. `streamsh` wraps your shell session and streams output to a daemon that agents query via MCP.
+
+Agents can search, page through, and (optionally) write to your terminal -- no copy-pasting required.
 
 ## Install
-
-**Quick install:**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/arnavsurve/streamsh/main/install.sh | sh
 ```
 
-This downloads prebuilt binaries to `~/.local/bin`. Set a custom location with `INSTALL_DIR`:
+Installs prebuilt binaries to `~/.local/bin`. Override with `INSTALL_DIR`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/arnavsurve/streamsh/main/install.sh | INSTALL_DIR=/usr/local/bin sh
 ```
+
+<details>
+<summary>Other install methods</summary>
 
 **With Go:**
 
@@ -31,17 +34,22 @@ cd streamsh
 ./install.sh
 ```
 
-## MCP Setup
+</details>
 
-Register `streamshd` as an MCP server so your coding agent can query terminal sessions.
+## Setup
 
-### Claude Code
+Register `streamshd` as an MCP server so your agent can access terminal sessions.
+
+**Claude Code:**
 
 ```sh
 claude mcp add -s user streamsh -- streamshd
 ```
 
-This registers the server globally (user scope), making it available across all projects. Alternatively, add it manually to `~/.claude.json`:
+<details>
+<summary>Manual config</summary>
+
+Add to `~/.claude.json`:
 
 ```json
 {
@@ -54,9 +62,11 @@ This registers the server globally (user scope), making it available across all 
 }
 ```
 
-### OpenCode
+</details>
 
-Add to `opencode.json` in your project root, or `~/.config/opencode/opencode.json` for global access:
+**OpenCode:**
+
+Add to `opencode.json` (project root) or `~/.config/opencode/opencode.json` (global):
 
 ```json
 {
@@ -71,12 +81,58 @@ Add to `opencode.json` in your project root, or `~/.config/opencode/opencode.jso
 
 ## Usage
 
-Start the daemon (typically configured as an MCP server in your agent), then open a tracked session in your terminal:
+Start a tracked shell session:
 
 ```sh
 streamsh
 ```
 
-Each session is identified by a short UUID prefix (e.g. `a1b2c3d4`). You can optionally pass `--title "dev server"` for a human-friendly label.
+That's it. Your agent can now see everything in your terminal.
 
-Agents connect to `streamshd` as an MCP server (stdio) and can list sessions, read the last N lines, search output, or paginate with a cursor. No need to run it manually -- this is the binary ran by your coding agent to host the MCP server.
+### Options
+
+```
+--title "name"    Label the session (default: auto-generated)
+--collab          Allow the agent to send input to your terminal
+--shell /bin/zsh  Override the default shell
+```
+
+### Collaborative mode
+
+With `--collab`, agents can type into your session. This lets them run commands, respond to prompts, and interact with your shell directly:
+
+```sh
+streamsh --collab
+```
+
+The agent gets access to the `write_session` MCP tool, which sends raw text to your terminal's PTY. You'll see everything the agent types in real time.
+
+## How it works
+
+```
+┌──────────┐       Unix socket       ┌───────────┐       MCP (stdio)       ┌───────────┐
+│ streamsh │ ───────────────────────> │ streamshd │ <───────────────────── │   Agent   │
+│ (client) │  output, commands, PTY  │  (daemon)  │  list, query, write   │           │
+└──────────┘                         └───────────┘                         └───────────┘
+```
+
+- **streamsh** launches your shell inside a PTY, captures all output (with ANSI codes stripped), and forwards it to the daemon over a Unix socket.
+- **streamshd** stores output in a per-session ring buffer (default 10,000 lines) and serves it to agents via three MCP tools:
+
+| Tool | Description |
+|------|-------------|
+| `list_sessions` | List all active and recent sessions |
+| `query_session` | Read output: last N lines, cursor pagination, or fuzzy search |
+| `write_session` | Send input to a `--collab` session |
+
+Sessions are identified by a short ID (e.g. `a1b2c3d4`) or by title.
+
+## Daemon flags
+
+`streamshd` is started automatically by your agent's MCP runtime. If needed, these flags are available:
+
+```
+--buffer-size 10000   Lines per session ring buffer
+--log-level info      Log level: debug, info, warn, error
+--socket <path>       Override Unix socket path
+```
