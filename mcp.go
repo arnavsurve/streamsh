@@ -36,7 +36,7 @@ type QuerySessionInput struct {
 // WriteSessionInput is the input for the write_session tool.
 type WriteSessionInput struct {
 	Session string `json:"session" jsonschema:"required,Session identifier: short ID, UUID, or title"`
-	Text    string `json:"text" jsonschema:"required,Raw text to write to the session PTY. Include newline (\\n) to execute a command. Only works on collaborative sessions (started with --collab)."`
+	Text    string `json:"text" jsonschema:"required,Raw text to write to the session PTY. Text is written byte-for-byte to the PTY. To press Enter/execute a command you MUST include an actual newline character at the end of your text (not a literal backslash-n). Only works on collaborative sessions (started with --collab)."`
 }
 
 // QuerySessionOutput is the JSON representation of query_session results.
@@ -133,7 +133,7 @@ func RegisterMCPTools(server *mcp.Server, store *Store) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "write_session",
-		Description: "Send raw text input to a collaborative shell session's PTY. The text is written exactly as provided — include \\n to press Enter and execute a command. Only works on sessions started with the --collab flag. The user sees all input in real-time.",
+		Description: "Send raw text input to a collaborative shell session's PTY. Text is written byte-for-byte — to press Enter and execute a command, include an actual newline character at the end of your text (not a literal backslash-n). Only works on sessions started with the --collab flag. The user sees all input in real-time.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input WriteSessionInput) (*mcp.CallToolResult, any, error) {
 		sess, err := store.Resolve(input.Session)
 		if err != nil {
