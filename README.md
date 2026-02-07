@@ -1,8 +1,8 @@
 # streamsh
 
-Give coding agents eyes on your terminal. `streamsh` wraps your shell session and streams output to a daemon that agents query via MCP.
+`streamsh` wraps your shell sessions and streams output to local agents via MCP.
 
-Agents can search, page through, and (optionally) write to your terminal -- no copy-pasting required.
+Agents can search, page through, and (optionally) write to your terminal.
 
 ## Install
 
@@ -87,8 +87,6 @@ Start a tracked shell session:
 streamsh
 ```
 
-That's it. Your agent can now see everything in your terminal.
-
 ### Options
 
 ```
@@ -107,32 +105,3 @@ streamsh --collab
 
 The agent gets access to the `write_session` MCP tool, which sends raw text to your terminal's PTY. You'll see everything the agent types in real time.
 
-## How it works
-
-```
-┌──────────┐       Unix socket       ┌───────────┐       MCP (stdio)       ┌───────────┐
-│ streamsh │ ───────────────────────> │ streamshd │ <───────────────────── │   Agent   │
-│ (client) │  output, commands, PTY  │  (daemon)  │  list, query, write   │           │
-└──────────┘                         └───────────┘                         └───────────┘
-```
-
-- **streamsh** launches your shell inside a PTY, captures all output (with ANSI codes stripped), and forwards it to the daemon over a Unix socket.
-- **streamshd** stores output in a per-session ring buffer (default 10,000 lines) and serves it to agents via three MCP tools:
-
-| Tool | Description |
-|------|-------------|
-| `list_sessions` | List all active and recent sessions |
-| `query_session` | Read output: last N lines, cursor pagination, or fuzzy search |
-| `write_session` | Send input to a `--collab` session |
-
-Sessions are identified by a short ID (e.g. `a1b2c3d4`) or by title.
-
-## Daemon flags
-
-`streamshd` is started automatically by your agent's MCP runtime. If needed, these flags are available:
-
-```
---buffer-size 10000   Lines per session ring buffer
---log-level info      Log level: debug, info, warn, error
---socket <path>       Override Unix socket path
-```
