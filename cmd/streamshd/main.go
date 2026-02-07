@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
 	"os"
@@ -43,25 +44,38 @@ func main() {
 		cancel()
 	}()
 
-	store := streamsh.NewStore()
-
-	// Start daemon (Unix socket listener)
+	// Try to start daemon — non-fatal if one is already running
 	daemon := &streamsh.Daemon{
-		Store:      store,
+		Store:      streamsh.NewStore(),
 		BufferSize: *bufferSize,
 		Logger:     logger,
 	}
-	if err := daemon.Listen(ctx, *socketPath); err != nil {
+	err := daemon.Listen(ctx, *socketPath)
+	if err != nil && !errors.Is(err, streamsh.ErrDaemonAlreadyRunning) {
 		logger.Error("failed to start daemon", "err", err)
 		os.Exit(1)
 	}
-	defer func() {
-		daemon.Close()
-		os.Remove(*socketPath)
-	}()
+	daemonOwner := err == nil
 
-	// Run MCP server on stdio
-	server := streamsh.NewMCPServer(store)
+	if daemonOwner {
+		defer func() {
+			daemon.Close()
+			os.Remove(*socketPath)
+		}()
+	} else {
+		logger.Info("daemon already running, connecting as MCP proxy")
+	}
+
+	// Connect to daemon for MCP operations
+	dc, err := streamsh.NewDaemonClient(*socketPath)
+	if err != nil {
+		logger.Error("failed to connect to daemon", "err", err)
+		os.Exit(1)
+	}
+	defer dc.Close()
+
+	// Run MCP server on stdio using DaemonClient
+	server := streamsh.NewMCPServer(dc)
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		if ctx.Err() == nil {
 			logger.Error("mcp server error", "err", err)

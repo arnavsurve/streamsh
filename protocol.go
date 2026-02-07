@@ -1,6 +1,9 @@
 package streamsh
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // MsgType identifies the kind of message sent over the Unix socket.
 type MsgType string
@@ -13,7 +16,16 @@ const (
 	MsgInput      MsgType = "input"
 	MsgAck        MsgType = "ack"
 	MsgError      MsgType = "error"
+
+	// MCP-proxy request types (MCP server → daemon)
+	MsgListSessions MsgType = "list_sessions"
+	MsgQuerySession MsgType = "query_session"
+	MsgWriteSession MsgType = "write_session"
 )
+
+// ErrDaemonAlreadyRunning is returned by Daemon.Listen when another daemon
+// is already listening on the socket.
+var ErrDaemonAlreadyRunning = errors.New("daemon already running")
 
 // Envelope is the wire format for all IPC messages (newline-delimited JSON).
 type Envelope struct {
@@ -53,4 +65,42 @@ type InputPayload struct {
 // ErrorPayload carries an error message from daemon to client.
 type ErrorPayload struct {
 	Message string `json:"message"`
+}
+
+// ListSessionsResponse is the daemon response for MsgListSessions.
+type ListSessionsResponse struct {
+	Sessions []SessionInfo `json:"sessions"`
+}
+
+// QuerySessionPayload is the request payload for MsgQuerySession.
+type QuerySessionPayload struct {
+	Session    string `json:"session"`
+	Search     string `json:"search,omitempty"`
+	LastN      int    `json:"last_n,omitempty"`
+	Cursor     uint64 `json:"cursor,omitempty"`
+	Count      int    `json:"count,omitempty"`
+	MaxResults int    `json:"max_results,omitempty"`
+}
+
+// QuerySessionResponse is the daemon response for MsgQuerySession.
+type QuerySessionResponse struct {
+	SessionID  string   `json:"session_id"`
+	Title      string   `json:"title"`
+	TotalLines int      `json:"total_lines"`
+	Lines      []string `json:"lines"`
+	NextCursor uint64   `json:"next_cursor,omitempty"`
+	HasMore    bool     `json:"has_more"`
+}
+
+// WriteSessionPayload is the request payload for MsgWriteSession.
+type WriteSessionPayload struct {
+	Session string `json:"session"`
+	Text    string `json:"text"`
+}
+
+// WriteSessionResponse is the daemon response for MsgWriteSession.
+type WriteSessionResponse struct {
+	Success   bool   `json:"success"`
+	SessionID string `json:"session_id"`
+	BytesSent int    `json:"bytes_sent"`
 }

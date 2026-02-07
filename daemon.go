@@ -42,7 +42,7 @@ func (d *Daemon) Listen(ctx context.Context, socketPath string) error {
 		conn, err := net.Dial("unix", socketPath)
 		if err == nil {
 			conn.Close()
-			return fmt.Errorf("another daemon is already running on %s", socketPath)
+			return ErrDaemonAlreadyRunning
 		}
 		os.Remove(socketPath)
 	}
@@ -175,6 +175,100 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 				d.Logger.Info("session disconnected", "id", sess.ShortID)
 			}
 			return
+
+		case MsgListSessions:
+			sessions := d.Store.List()
+			infos := make([]SessionInfo, len(sessions))
+			for i, s := range sessions {
+				infos[i] = SessionInfo{
+					ID:          s.ShortID,
+					Title:       s.Title,
+					LastCommand: s.LastCommand,
+					LineCount:   s.Buffer.Len(),
+					CreatedAt:   s.CreatedAt.Format(time.RFC3339),
+					Connected:   s.Connected,
+					Collab:      s.Collab,
+				}
+			}
+			enc.Encode(Envelope{
+				Type:    MsgAck,
+				Payload: mustMarshal(ListSessionsResponse{Sessions: infos}),
+			})
+
+		case MsgQuerySession:
+			var p QuerySessionPayload
+			if env.Payload != nil {
+				json.Unmarshal(env.Payload, &p)
+			}
+			sess, err := d.Store.Resolve(p.Session)
+			if err != nil {
+				enc.Encode(Envelope{
+					Type:    MsgError,
+					Payload: mustMarshal(ErrorPayload{Message: err.Error()}),
+				})
+				continue
+			}
+			resp := QuerySessionResponse{
+				SessionID:  sess.ShortID,
+				Title:      sess.Title,
+				TotalLines: sess.Buffer.Len(),
+			}
+			switch {
+			case p.Search != "":
+				maxResults := p.MaxResults
+				if maxResults <= 0 {
+					maxResults = 50
+				}
+				results := sess.Buffer.Search(p.Search, maxResults)
+				resp.Lines = make([]string, len(results))
+				for i, r := range results {
+					resp.Lines[i] = fmt.Sprintf("[%d] %s", r.Seq, r.Line)
+				}
+			case p.LastN > 0:
+				resp.Lines = sess.Buffer.LastN(p.LastN)
+			default:
+				count := p.Count
+				if count <= 0 {
+					count = 100
+				}
+				lines, nextCursor, hasMore := sess.Buffer.ReadRange(p.Cursor, count)
+				resp.Lines = lines
+				resp.NextCursor = nextCursor
+				resp.HasMore = hasMore
+			}
+			enc.Encode(Envelope{
+				Type:    MsgAck,
+				Payload: mustMarshal(resp),
+			})
+
+		case MsgWriteSession:
+			var p WriteSessionPayload
+			if env.Payload != nil {
+				json.Unmarshal(env.Payload, &p)
+			}
+			sess, err := d.Store.Resolve(p.Session)
+			if err != nil {
+				enc.Encode(Envelope{
+					Type:    MsgError,
+					Payload: mustMarshal(ErrorPayload{Message: err.Error()}),
+				})
+				continue
+			}
+			if err := sess.SendInput(p.Text); err != nil {
+				enc.Encode(Envelope{
+					Type:    MsgError,
+					Payload: mustMarshal(ErrorPayload{Message: err.Error()}),
+				})
+				continue
+			}
+			enc.Encode(Envelope{
+				Type: MsgAck,
+				Payload: mustMarshal(WriteSessionResponse{
+					Success:   true,
+					SessionID: sess.ShortID,
+					BytesSent: len(p.Text),
+				}),
+			})
 		}
 	}
 
