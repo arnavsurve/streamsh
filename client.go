@@ -14,9 +14,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
+	"github.com/acarl005/stripansi"
 	"github.com/creack/pty"
+	"github.com/google/uuid"
 	"golang.org/x/term"
 )
 
@@ -33,7 +37,13 @@ type Client struct {
 	scanner   *bufio.Scanner
 	sessionID string
 	shortID   string
-	mu        sync.Mutex // protects writes to conn
+	mu        sync.Mutex // protects conn, enc, scanner
+
+	localBuf    *RingBuffer          // local ring buffer, always receives output
+	connected   atomic.Bool          // whether currently connected to daemon
+	lastCommand atomic.Pointer[string] // last detected command, for replay
+	ptmx        *os.File             // PTY master, needed by reconnect for collab
+	stopReconn  chan struct{}         // signals reconnection goroutine to stop
 }
 
 // Run starts the shell session and streams output to the daemon.
@@ -45,11 +55,27 @@ func (c *Client) Run() (int, error) {
 		return 1, nil
 	}
 
-	// Connect to daemon
+	// Self-assign session identity
+	c.sessionID = uuid.New().String()
+	c.shortID = c.sessionID[:8]
+
+	// Create local ring buffer
+	c.localBuf = NewRingBuffer(10000)
+
+	// Initialize reconnection control
+	c.stopReconn = make(chan struct{})
+
+	// Attempt initial connection (non-fatal if fails)
 	if err := c.connect(); err != nil {
-		c.Logger.Warn("could not connect to daemon, session will not be recorded", "err", err)
+		c.Logger.Warn("could not connect to daemon, will retry in background", "err", err)
 	}
-	defer c.disconnect()
+
+	// Start background reconnection goroutine
+	go c.reconnectionLoop()
+	defer func() {
+		close(c.stopReconn)
+		c.disconnect()
+	}()
 
 	// Start shell in PTY
 	shell := c.Shell
@@ -75,6 +101,7 @@ func (c *Client) Run() (int, error) {
 		return 1, fmt.Errorf("starting pty: %w", err)
 	}
 	defer ptmx.Close()
+	c.ptmx = ptmx
 
 	// Handle terminal resize
 	ch := make(chan os.Signal, 1)
@@ -99,7 +126,7 @@ func (c *Client) Run() (int, error) {
 	go c.copyStdinToPTY(ptmx)
 
 	// daemon -> PTY (collab mode: receive agent input)
-	if c.Collab && c.conn != nil {
+	if c.Collab && c.connected.Load() {
 		go c.handleIncomingMessages(ptmx)
 	}
 
@@ -135,42 +162,149 @@ func (c *Client) connect() error {
 	if err != nil {
 		return err
 	}
+
+	c.mu.Lock()
 	c.conn = conn
 	c.enc = json.NewEncoder(conn)
-
-	// Register session
-	payload := mustMarshal(RegisterPayload{Title: c.Title, Collab: c.Collab})
-	c.sendMsg(Envelope{Type: MsgRegister, Payload: payload})
-
-	// Read ack (keep scanner for later use in collab mode)
 	c.scanner = bufio.NewScanner(conn)
 	c.scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	c.mu.Unlock()
+
+	// Register session with self-assigned ID
+	payload := mustMarshal(RegisterPayload{
+		Title:     c.Title,
+		Collab:    c.Collab,
+		SessionID: c.sessionID,
+	})
+	c.sendMsg(Envelope{Type: MsgRegister, Payload: payload})
+
+	// Read ack
 	if c.scanner.Scan() {
 		var env Envelope
 		if err := json.Unmarshal(c.scanner.Bytes(), &env); err == nil && env.Type == MsgAck {
 			var ack RegisterAck
 			json.Unmarshal(env.Payload, &ack)
-			c.sessionID = ack.SessionID
-			c.shortID = ack.ShortID
 			c.Logger.Info("session registered", "id", ack.ShortID)
 		}
 	}
+
+	c.connected.Store(true)
+
+	// Replay local buffer to daemon
+	c.replayBuffer()
+
 	return nil
 }
 
 func (c *Client) disconnect() {
+	if !c.connected.Load() {
+		return
+	}
+	c.connected.Store(false)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.conn == nil {
 		return
 	}
-	c.sendMsg(Envelope{Type: MsgDisconnect, SessionID: c.sessionID})
+	// Best-effort disconnect message
+	c.enc.Encode(Envelope{Type: MsgDisconnect, SessionID: c.sessionID})
 	c.conn.Close()
 	c.conn = nil
+	c.enc = nil
+	c.scanner = nil
+}
+
+func (c *Client) replayBuffer() {
+	lines := c.localBuf.AllLines()
+	if len(lines) == 0 {
+		return
+	}
+
+	const chunkSize = 500
+	for i := 0; i < len(lines); i += chunkSize {
+		end := i + chunkSize
+		if end > len(lines) {
+			end = len(lines)
+		}
+		chunk := lines[i:end]
+		isLast := end >= len(lines)
+
+		payload := ReplayPayload{Lines: chunk}
+		if isLast {
+			if cmd := c.getLastCommand(); cmd != "" {
+				payload.LastCommand = cmd
+			}
+		}
+		c.sendMsg(Envelope{
+			Type:      MsgReplay,
+			SessionID: c.sessionID,
+			Payload:   mustMarshal(payload),
+		})
+	}
+	c.Logger.Debug("replayed buffer to daemon", "lines", len(lines))
+}
+
+func (c *Client) reconnectionLoop() {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.stopReconn:
+			return
+		case <-ticker.C:
+			if c.connected.Load() {
+				continue
+			}
+
+			// Clean up old connection if any
+			c.mu.Lock()
+			if c.conn != nil {
+				c.conn.Close()
+				c.conn = nil
+				c.enc = nil
+				c.scanner = nil
+			}
+			c.mu.Unlock()
+
+			if err := c.connect(); err != nil {
+				continue
+			}
+			c.Logger.Info("reconnected to daemon", "id", c.shortID)
+
+			if c.Collab && c.ptmx != nil {
+				go c.handleIncomingMessages(c.ptmx)
+			}
+		}
+	}
+}
+
+func (c *Client) setLastCommand(cmd string) {
+	c.lastCommand.Store(&cmd)
+}
+
+func (c *Client) getLastCommand() string {
+	p := c.lastCommand.Load()
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (c *Client) handleIncomingMessages(ptmx *os.File) {
-	for c.scanner.Scan() {
+	// Capture scanner reference locally to avoid race with reconnection
+	c.mu.Lock()
+	scanner := c.scanner
+	c.mu.Unlock()
+
+	if scanner == nil {
+		return
+	}
+
+	for scanner.Scan() {
 		var env Envelope
-		if err := json.Unmarshal(c.scanner.Bytes(), &env); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &env); err != nil {
 			c.Logger.Debug("failed to parse incoming message", "err", err)
 			continue
 		}
@@ -184,6 +318,8 @@ func (c *Client) handleIncomingMessages(ptmx *os.File) {
 			}
 		}
 	}
+	// Scanner ended — connection lost
+	c.connected.Store(false)
 }
 
 func (c *Client) promptTag() string {
@@ -284,12 +420,22 @@ func (c *Client) sendMsg(env Envelope) {
 		return
 	}
 	if err := c.enc.Encode(env); err != nil {
-		c.Logger.Debug("send error", "err", err)
+		c.Logger.Debug("send error, marking disconnected", "err", err)
+		c.connected.Store(false)
+		c.conn.Close()
+		c.conn = nil
+		c.enc = nil
+		c.scanner = nil
 	}
 }
 
 func (c *Client) sendOutput(lines []string) {
-	if len(lines) == 0 {
+	// Always write to local buffer, regardless of connection state
+	for _, line := range lines {
+		c.localBuf.Append(stripansi.Strip(line))
+	}
+
+	if !c.connected.Load() || len(lines) == 0 {
 		return
 	}
 	c.sendMsg(Envelope{
@@ -301,6 +447,11 @@ func (c *Client) sendOutput(lines []string) {
 
 func (c *Client) sendCommand(cmd string) {
 	if cmd == "" {
+		return
+	}
+	c.setLastCommand(cmd)
+
+	if !c.connected.Load() {
 		return
 	}
 	c.sendMsg(Envelope{
@@ -351,25 +502,23 @@ func (c *Client) copyPTYToStdout(ptmx *os.File) {
 		if n > 0 {
 			os.Stdout.Write(buf[:n])
 
-			// Assemble lines for daemon
-			if c.conn != nil {
-				for _, b := range buf[:n] {
-					if b == '\n' {
-						batch = append(batch, lineBuf.String())
-						lineBuf.Reset()
-					} else {
-						lineBuf.WriteByte(b)
-					}
+			// Always assemble lines (local buffer + daemon if connected)
+			for _, b := range buf[:n] {
+				if b == '\n' {
+					batch = append(batch, lineBuf.String())
+					lineBuf.Reset()
+				} else {
+					lineBuf.WriteByte(b)
 				}
-				if len(batch) > 0 {
-					c.sendOutput(batch)
-					batch = batch[:0]
-				}
+			}
+			if len(batch) > 0 {
+				c.sendOutput(batch)
+				batch = batch[:0]
 			}
 		}
 		if err != nil {
 			// Flush remaining line buffer
-			if lineBuf.Len() > 0 && c.conn != nil {
+			if lineBuf.Len() > 0 {
 				c.sendOutput([]string{lineBuf.String()})
 			}
 			if err != io.EOF {

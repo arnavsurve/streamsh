@@ -127,6 +127,40 @@ func (rb *RingBuffer) ReadRange(from uint64, count int) ([]string, uint64, bool)
 	return result, nextCursor, hasMore
 }
 
+// Cap returns the buffer's capacity.
+func (rb *RingBuffer) Cap() int {
+	return rb.cap
+}
+
+// AllLines returns all lines currently in the buffer, from oldest to newest.
+func (rb *RingBuffer) AllLines() []string {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
+	if rb.count == 0 {
+		return nil
+	}
+
+	result := make([]string, rb.count)
+	start := (rb.head - rb.count + rb.cap) % rb.cap
+	for i := 0; i < rb.count; i++ {
+		result[i] = rb.lines[(start+i)%rb.cap]
+	}
+	return result
+}
+
+// Clear resets the ring buffer to an empty state.
+func (rb *RingBuffer) Clear() {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	rb.head = 0
+	rb.count = 0
+	rb.totalSeq = 0
+	for i := range rb.lines {
+		rb.lines[i] = ""
+	}
+}
+
 // Search returns lines matching a case-insensitive substring search.
 // Results are ordered from oldest to newest, capped at maxResults.
 func (rb *RingBuffer) Search(pattern string, maxResults int) []SearchResult {

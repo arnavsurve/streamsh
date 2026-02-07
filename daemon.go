@@ -128,9 +128,33 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 			if p.Collab {
 				clientConn = conn
 			}
-			sess := d.Store.Create(p.Title, bufSize, p.Collab, clientConn)
+
+			var sess *Session
+			var reconnected bool
+
+			if p.SessionID != "" {
+				id, err := uuid.Parse(p.SessionID)
+				if err != nil {
+					d.Logger.Error("invalid session ID from client", "id", p.SessionID, "err", err)
+					enc.Encode(Envelope{
+						Type:    MsgError,
+						Payload: mustMarshal(ErrorPayload{Message: "invalid session ID"}),
+					})
+					continue
+				}
+				sess, reconnected = d.Store.CreateOrUpdate(id, p.Title, bufSize, p.Collab, clientConn)
+			} else {
+				sess = d.Store.Create(p.Title, bufSize, p.Collab, clientConn)
+			}
+
 			sessionID = sess.ID
-			d.Logger.Info("session registered", "id", sess.ShortID, "title", p.Title, "collab", p.Collab)
+
+			if reconnected {
+				sess.Buffer.Clear()
+				d.Logger.Info("session reconnected", "id", sess.ShortID, "title", p.Title)
+			} else {
+				d.Logger.Info("session registered", "id", sess.ShortID, "title", p.Title, "collab", p.Collab)
+			}
 
 			enc.Encode(Envelope{
 				Type: MsgAck,
@@ -151,6 +175,23 @@ func (d *Daemon) handleConn(ctx context.Context, conn net.Conn) {
 			}
 			for _, line := range p.Lines {
 				sess.Buffer.Append(stripansi.Strip(line))
+			}
+			sess.LastActivity = time.Now()
+
+		case MsgReplay:
+			var p ReplayPayload
+			if env.Payload != nil {
+				json.Unmarshal(env.Payload, &p)
+			}
+			sess, ok := d.Store.Get(sessionID)
+			if !ok {
+				continue
+			}
+			for _, line := range p.Lines {
+				sess.Buffer.Append(line)
+			}
+			if p.LastCommand != "" {
+				sess.LastCommand = p.LastCommand
 			}
 			sess.LastActivity = time.Now()
 

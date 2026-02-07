@@ -17,6 +17,8 @@ const (
 	MsgAck        MsgType = "ack"
 	MsgError      MsgType = "error"
 
+	MsgReplay MsgType = "replay" // historical buffer replay on reconnect
+
 	// MCP-proxy request types (MCP server → daemon)
 	MsgListSessions MsgType = "list_sessions"
 	MsgQuerySession MsgType = "query_session"
@@ -39,6 +41,7 @@ type RegisterPayload struct {
 	Title      string `json:"title,omitempty"`
 	BufferSize int    `json:"buffer_size,omitempty"`
 	Collab     bool   `json:"collab,omitempty"`
+	SessionID  string `json:"session_id,omitempty"` // client-assigned UUID for reconnection
 }
 
 // RegisterAck is sent by the daemon after a successful registration.
@@ -65,6 +68,12 @@ type InputPayload struct {
 // ErrorPayload carries an error message from daemon to client.
 type ErrorPayload struct {
 	Message string `json:"message"`
+}
+
+// ReplayPayload carries historical buffer content on reconnect.
+type ReplayPayload struct {
+	Lines       []string `json:"lines"`
+	LastCommand string   `json:"last_command,omitempty"`
 }
 
 // ListSessionsResponse is the daemon response for MsgListSessions.

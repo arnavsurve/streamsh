@@ -61,6 +61,39 @@ func (s *Store) Create(title string, bufCap int, collab bool, conn net.Conn) *Se
 	return sess
 }
 
+// CreateOrUpdate creates a session with the given ID, or updates an existing one
+// if a session with that ID already exists (reconnection). Returns the session
+// and whether this was a reconnection.
+func (s *Store) CreateOrUpdate(id uuid.UUID, title string, bufCap int, collab bool, conn net.Conn) (*Session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing, ok := s.sessions[id]; ok {
+		existing.SetConn(conn)
+		existing.Collab = collab
+		if title != "" {
+			existing.Title = title
+		}
+		existing.LastActivity = time.Now()
+		return existing, true
+	}
+
+	now := time.Now()
+	sess := &Session{
+		ID:           id,
+		ShortID:      id.String()[:8],
+		Title:        title,
+		CreatedAt:    now,
+		LastActivity: now,
+		Connected:    true,
+		Buffer:       NewRingBuffer(bufCap),
+		Collab:       collab,
+		clientConn:   conn,
+	}
+	s.sessions[id] = sess
+	return sess, false
+}
+
 // SendInput sends text to the session's PTY via the client connection.
 func (s *Session) SendInput(text string) error {
 	if !s.Collab {
@@ -76,6 +109,14 @@ func (s *Session) SendInput(text string) error {
 		Payload: mustMarshal(InputPayload{Text: text}),
 	}
 	return json.NewEncoder(s.clientConn).Encode(env)
+}
+
+// SetConn updates the client connection reference and marks the session connected.
+func (s *Session) SetConn(conn net.Conn) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	s.clientConn = conn
+	s.Connected = true
 }
 
 // ClearConn removes the client connection reference.
