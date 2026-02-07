@@ -42,7 +42,7 @@ type WriteSessionInput struct {
 func RegisterMCPTools(server *mcp.Server, dc *DaemonClient) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_sessions",
-		Description: "List all active and recent shell sessions being tracked by streamsh. Returns session IDs, titles, last commands, and connection status.",
+		Description: "List all terminal sessions. Returns each session's ID, title, last command run, and connection status. Use this to find sessions relevant to your current task before querying their output.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListSessionsInput) (*mcp.CallToolResult, any, error) {
 		infos, err := dc.ListSessions()
 		if err != nil {
@@ -64,7 +64,7 @@ func RegisterMCPTools(server *mcp.Server, dc *DaemonClient) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "query_session",
-		Description: "Query shell output from a specific session. Supports fuzzy search, reading the last N lines, or cursor-based pagination through the output buffer.",
+		Description: "Read output from a terminal session. Use last_n to get recent output (e.g. to check for errors after a change), search to find specific patterns in the output (e.g. error messages, stack traces), or cursor for paginated reading.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input QuerySessionInput) (*mcp.CallToolResult, any, error) {
 		resp, err := dc.QuerySession(QuerySessionPayload{
 			Session:    input.Session,
@@ -117,6 +117,17 @@ func RegisterMCPTools(server *mcp.Server, dc *DaemonClient) {
 	})
 }
 
+// serverInstructions tells consuming agents when and how to use streamsh tools.
+const serverInstructions = `You have access to the user's live terminal sessions via streamsh.
+
+Use these tools proactively when you have a reason to:
+- After making code changes, check sessions running the affected service or tests for errors or confirmation that the change worked.
+- When the user mentions an error, unexpected behavior, or a failing build, check relevant sessions for logs and stack traces.
+- When debugging, search session output for error messages, warnings, or relevant log lines.
+- After the user runs a deploy, migration, or build, check the session to verify it succeeded.
+
+Use list_sessions to see what's running (each session shows its last command), then query_session to read the output you need. Don't read sessions unless the output is relevant to what you're working on.`
+
 // NewMCPServer creates a configured MCP server with tools registered.
 func NewMCPServer(dc *DaemonClient) *mcp.Server {
 	server := mcp.NewServer(
@@ -124,7 +135,9 @@ func NewMCPServer(dc *DaemonClient) *mcp.Server {
 			Name:    "streamsh",
 			Version: "0.1.0",
 		},
-		nil,
+		&mcp.ServerOptions{
+			Instructions: serverInstructions,
+		},
 	)
 	RegisterMCPTools(server, dc)
 	return server
