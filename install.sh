@@ -80,6 +80,13 @@ cp "$TMPDIR/streamsh" "$INSTALL_DIR/streamsh"
 cp "$TMPDIR/streamshd" "$INSTALL_DIR/streamshd"
 chmod +x "$INSTALL_DIR/streamsh" "$INSTALL_DIR/streamshd"
 
+# On macOS, downloaded binaries get quarantine attributes that cause Gatekeeper
+# to SIGKILL the process. Strip them so the binaries can actually run.
+if [ "$OS" = "darwin" ] && command -v xattr &>/dev/null; then
+  xattr -c "$INSTALL_DIR/streamsh" 2>/dev/null || true
+  xattr -c "$INSTALL_DIR/streamshd" 2>/dev/null || true
+fi
+
 echo "Installed to $INSTALL_DIR"
 
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
