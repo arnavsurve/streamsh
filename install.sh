@@ -80,6 +80,14 @@ cp "$TMPDIR/streamsh" "$INSTALL_DIR/streamsh"
 cp "$TMPDIR/streamshd" "$INSTALL_DIR/streamshd"
 chmod +x "$INSTALL_DIR/streamsh" "$INSTALL_DIR/streamshd"
 
+# On macOS, downloaded binaries get a persistent com.apple.provenance attribute
+# that causes Gatekeeper to SIGKILL ad-hoc signed processes. Re-signing locally
+# replaces the linker signature and clears the provenance flag.
+if [ "$OS" = "darwin" ] && command -v codesign &>/dev/null; then
+  codesign --force --sign - "$INSTALL_DIR/streamsh" 2>/dev/null || true
+  codesign --force --sign - "$INSTALL_DIR/streamshd" 2>/dev/null || true
+fi
+
 echo "Installed to $INSTALL_DIR"
 
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
