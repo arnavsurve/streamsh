@@ -27,7 +27,7 @@ type RingBuffer struct {
 // NewRingBuffer creates a ring buffer with the given capacity.
 func NewRingBuffer(capacity int) *RingBuffer {
 	if capacity <= 0 {
-		capacity = 10000
+		capacity = 100000
 	}
 	return &RingBuffer{
 		lines: make([]string, capacity),
