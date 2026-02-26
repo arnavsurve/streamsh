@@ -136,7 +136,7 @@ func TestRingBufferSearch(t *testing.T) {
 
 func TestRingBufferDefaultCapacity(t *testing.T) {
 	rb := NewRingBuffer(0)
-	if rb.cap != 10000 {
-		t.Errorf("expected default cap 10000, got %d", rb.cap)
+	if rb.cap != 100000 {
+		t.Errorf("expected default cap 100000, got %d", rb.cap)
 	}
 }

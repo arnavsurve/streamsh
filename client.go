@@ -60,7 +60,7 @@ func (c *Client) Run() (int, error) {
 	c.shortID = c.sessionID[:8]
 
 	// Create local ring buffer
-	c.localBuf = NewRingBuffer(10000)
+	c.localBuf = NewRingBuffer(100000)
 
 	// Initialize reconnection control
 	c.stopReconn = make(chan struct{})

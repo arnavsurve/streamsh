@@ -15,7 +15,7 @@ import (
 
 func main() {
 	socketPath := flag.String("socket", streamsh.SocketPathFromEnv(), "Unix socket path")
-	bufferSize := flag.Int("buffer-size", 10000, "Lines per session ring buffer")
+	bufferSize := flag.Int("buffer-size", 100000, "Lines per session ring buffer")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	flag.Parse()
 
